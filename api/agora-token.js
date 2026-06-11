@@ -1,6 +1,6 @@
-const { RtcTokenBuilder, RtcRole } = require('agora-token')
+import { RtcTokenBuilder, RtcRole } from 'agora-token'
 
-module.exports = function handler(req, res) {
+export default function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Access-Control-Allow-Methods', 'GET')
 
@@ -17,16 +17,20 @@ module.exports = function handler(req, res) {
     return res.status(500).json({ error: 'Agora credentials not configured' })
   }
 
-  const expireTs = Math.floor(Date.now() / 1000) + 3600 // 1 hour
-  const token = RtcTokenBuilder.buildTokenWithUserAccount(
-    appId,
-    appCertificate,
-    channel,
-    uid || '',
-    RtcRole.PUBLISHER,
-    expireTs,
-    expireTs
-  )
+  const expireTs = Math.floor(Date.now() / 1000) + 3600
 
-  res.json({ token, expireTs })
+  try {
+    const token = RtcTokenBuilder.buildTokenWithUserAccount(
+      appId,
+      appCertificate,
+      channel,
+      uid || '',
+      RtcRole.PUBLISHER,
+      expireTs,
+      expireTs
+    )
+    res.json({ token, expireTs })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
 }
