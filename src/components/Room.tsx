@@ -106,7 +106,7 @@ export function Room({ roomId, userId, displayName, enableCamera, enableMic, onL
       } else {
         appId = env.agora.appId
         if (env.agora.appCertificate) {
-          const res = await fetch(`/api/agora-token?channel=${encodeURIComponent(roomId)}&uid=${encodeURIComponent(userId)}`)
+          const res = await fetch(`/api/agora-token?channel=${encodeURIComponent(roomId)}&uid=`)
           const data = await res.json()
           if (data.error) throw new Error('Token fetch failed: ' + data.error)
           token = data.token
