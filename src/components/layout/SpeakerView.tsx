@@ -29,7 +29,7 @@ export function SpeakerView({ participants }: Props) {
   return (
     <div className="flex flex-col h-full gap-2 p-2">
       {/* Primary large tile */}
-      <div className="flex-1 min-h-0 relative">
+      <div className="flex-1 min-h-0 w-full relative">
         {primary && (
           <VideoTile
             participant={primary}
@@ -41,9 +41,9 @@ export function SpeakerView({ participants }: Props) {
 
       {/* Strip of thumbnails */}
       {strip.length > 0 && (
-        <div className="flex gap-2 overflow-x-auto h-28 flex-shrink-0">
+        <div className="flex gap-2 overflow-x-auto flex-shrink-0" style={{ height: '7rem' }}>
           {strip.map(p => (
-            <div key={p.userId} className="h-full aspect-video flex-shrink-0">
+            <div key={p.userId} className="h-full aspect-video flex-shrink-0 relative">
               <VideoTile
                 participant={p}
                 isPinned={pinnedUserId === p.userId}

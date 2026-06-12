@@ -25,14 +25,15 @@ export function GridView({ participants }: Props) {
     'grid-cols-4'
 
   return (
-    <div className={`grid ${cols} gap-2 w-full h-full p-2`}>
+    <div className={`grid ${cols} gap-2 w-full h-full p-2`} style={{ gridAutoRows: '1fr' }}>
       {participants.map(p => (
-        <VideoTile
-          key={p.userId}
-          participant={p}
-          isPinned={pinnedUserId === p.userId}
-          onPin={handlePin}
-        />
+        <div key={p.userId} className="relative min-h-0">
+          <VideoTile
+            participant={p}
+            isPinned={pinnedUserId === p.userId}
+            onPin={handlePin}
+          />
+        </div>
       ))}
     </div>
   )

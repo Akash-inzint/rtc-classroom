@@ -67,13 +67,17 @@ export function VideoTile({ participant, isPinned, onPin }: Props) {
 
   return (
     <div
-      className={`relative rounded-xl overflow-hidden bg-gray-900 cursor-pointer group
+      className={`relative w-full h-full rounded-xl overflow-hidden bg-gray-900 cursor-pointer group
         ${isActive ? 'ring-2 ring-blue-400' : 'ring-1 ring-gray-700'}
         ${isPinned ? 'ring-2 ring-yellow-400' : ''}`}
       onClick={() => onPin?.(participant.userId)}
     >
-      {/* Video / Placeholder */}
-      <div ref={setRef} className={`w-full h-full ${participant.videoEnabled ? '' : 'hidden'}`} />
+      {/* Video container — always in DOM so SDK can attach; hidden via CSS when off */}
+      <div
+        ref={setRef}
+        className="absolute inset-0"
+        style={{ display: participant.videoEnabled ? 'block' : 'none' }}
+      />
       {!participant.videoEnabled && <VideoPlaceholder displayName={participant.displayName} />}
 
       {/* Bottom overlay */}
