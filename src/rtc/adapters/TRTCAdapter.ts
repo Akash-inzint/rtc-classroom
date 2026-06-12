@@ -111,16 +111,17 @@ export class TRTCAdapter implements IRTCProvider {
 
     this.client.on(TRTC.EVENT.REMOTE_VIDEO_AVAILABLE, ({ userId, streamType }: { userId: string; streamType: string }) => {
       const p = this.participants.get(userId)
-      if (p) { p.videoEnabled = true; this.participants.set(userId, p) }
+      if (p) { p.videoEnabled = true; p.isScreenSharing = streamType === 'screen'; this.participants.set(userId, p) }
       this.emit('videoStateChanged', userId, true)
-      // Subscribe to remote video — actual rendering done by playRemoteVideo()
-      this.client.startRemoteVideo({ userId, streamType, view: null }).catch(() => {})
+      if (streamType === 'screen') this.emit('screenShareStarted', userId)
+      // Don't start here — VideoTile will call playRemoteVideo with the DOM element
     })
 
-    this.client.on(TRTC.EVENT.REMOTE_VIDEO_UNAVAILABLE, ({ userId }: { userId: string }) => {
+    this.client.on(TRTC.EVENT.REMOTE_VIDEO_UNAVAILABLE, ({ userId, streamType }: { userId: string; streamType?: string }) => {
       const p = this.participants.get(userId)
-      if (p) { p.videoEnabled = false; this.participants.set(userId, p) }
+      if (p) { p.videoEnabled = false; if (streamType === 'screen') p.isScreenSharing = false; this.participants.set(userId, p) }
       this.emit('videoStateChanged', userId, false)
+      if (streamType === 'screen') this.emit('screenShareStopped', userId)
     })
 
     this.client.on(TRTC.EVENT.AUDIO_VOLUME, ({ result }: { result: Array<{ userId: string; volume: number }> }) => {
@@ -161,8 +162,8 @@ export class TRTCAdapter implements IRTCProvider {
   }
 
   async enableCamera(deviceId?: string): Promise<void> {
-    const opts: any = deviceId ? { option: { cameraId: deviceId } } : {}
-    if (this.localVideoEl) opts.view = this.localVideoEl
+    const opts: any = { view: this.localVideoEl }
+    if (deviceId) opts.option = { cameraId: deviceId }
     await this.client.startLocalVideo(opts)
     this._cameraEnabled = true
     this.emit('videoStateChanged', 'local', true)
@@ -256,13 +257,21 @@ export class TRTCAdapter implements IRTCProvider {
   }
 
   playRemoteVideo(userId: string, element: HTMLElement): void {
-    this.client.startRemoteVideo({ userId, streamType: 'main', view: element }).catch(() => {})
+    // Try main stream first; if this user is screen-sharing, also try 'screen' streamType
+    const p = this.participants.get(userId)
+    const streamType = (p?.isScreenSharing && !p?.videoEnabled) ? 'screen' : 'main'
+    this.client.startRemoteVideo({ userId, streamType, view: element }).catch(() => {
+      // Fallback: try the other stream type
+      const fallback = streamType === 'main' ? 'screen' : 'main'
+      this.client.startRemoteVideo({ userId, streamType: fallback, view: element }).catch(() => {})
+    })
   }
 
   playLocalVideo(element: HTMLElement): void {
     this.localVideoEl = element
     if (this._cameraEnabled) {
-      this.client.updateLocalVideo({ view: element }).catch(() => {})
+      // startLocalVideo with a new view re-attaches the existing stream to the element
+      this.client.startLocalVideo({ view: element }).catch(() => {})
     }
   }
 
