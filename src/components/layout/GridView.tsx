@@ -27,7 +27,7 @@ export function GridView({ participants }: Props) {
   return (
     <div className={`grid ${cols} gap-2 w-full h-full p-2`} style={{ gridAutoRows: '1fr' }}>
       {participants.map(p => (
-        <div key={p.userId} className="relative min-h-0">
+        <div key={p.userId} className="relative min-h-0 h-full">
           <VideoTile
             participant={p}
             isPinned={pinnedUserId === p.userId}

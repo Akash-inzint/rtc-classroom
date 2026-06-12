@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useLayoutEffect, useRef } from 'react'
 import type { RTCParticipant } from '../rtc/IRTCProvider'
 import { VideoPlaceholder } from './VideoPlaceholder'
 import { useRTCContext } from '../rtc/RTCContext'
@@ -13,41 +13,23 @@ interface Props {
 export function VideoTile({ participant, isPinned, onPin }: Props) {
   const { provider } = useRTCContext()
   const { activeSpeakerId, handRaises } = useRoomStore()
-  const providerRef = useRef(provider)
-  const participantRef = useRef(participant)
-  providerRef.current = provider
-  participantRef.current = participant
+  const videoRef = useRef<HTMLDivElement>(null)
 
   const isActive = activeSpeakerId === participant.userId
   const hasHandRaised = handRaises.includes(participant.userId)
 
-  // Callback ref: fires whenever the element is mounted/unmounted, so video
-  // re-attaches correctly when the tile moves between grid and speaker view.
-  const videoRef = useCallback((el: HTMLDivElement | null) => {
-    if (!el || !providerRef.current) return
-    const p = participantRef.current
-    if (p.isLocal) {
-      providerRef.current.playLocalVideo(el)
-    } else if (p.videoEnabled) {
-      providerRef.current.playRemoteVideo(p.userId, el)
-    }
-  }, []) // stable — provider/participant accessed via refs
-
-  // Re-attach when videoEnabled flips to true (element already mounted)
-  const elRef = useRef<HTMLDivElement | null>(null)
-  const setRef = useCallback((el: HTMLDivElement | null) => {
-    elRef.current = el
-    videoRef(el)
-  }, [videoRef])
-
-  useEffect(() => {
-    if (!provider || !elRef.current || !participant.videoEnabled) return
+  // useLayoutEffect runs after every render, synchronously after DOM paint.
+  // This means every time the tile mounts (new DOM element) or videoEnabled
+  // changes, we immediately attach the stream to the element.
+  useLayoutEffect(() => {
+    const el = videoRef.current
+    if (!provider || !el) return
     if (participant.isLocal) {
-      provider.playLocalVideo(elRef.current)
-    } else {
-      provider.playRemoteVideo(participant.userId, elRef.current)
+      provider.playLocalVideo(el)
+    } else if (participant.videoEnabled) {
+      provider.playRemoteVideo(participant.userId, el)
     }
-  }, [provider, participant.userId, participant.isLocal, participant.videoEnabled])
+  })
 
   const networkBars = (quality: number) => {
     const filled = Math.max(0, 4 - Math.floor(quality * 4 / 6))
@@ -72,9 +54,9 @@ export function VideoTile({ participant, isPinned, onPin }: Props) {
         ${isPinned ? 'ring-2 ring-yellow-400' : ''}`}
       onClick={() => onPin?.(participant.userId)}
     >
-      {/* Video container — always in DOM so SDK can attach; hidden via CSS when off */}
+      {/* Video container — always in DOM, fills tile via absolute inset */}
       <div
-        ref={setRef}
+        ref={videoRef}
         className="absolute inset-0"
         style={{ display: participant.videoEnabled ? 'block' : 'none' }}
       />
@@ -83,11 +65,7 @@ export function VideoTile({ participant, isPinned, onPin }: Props) {
       {/* Bottom overlay */}
       <div className="absolute bottom-0 left-0 right-0 px-2 py-1.5 bg-gradient-to-t from-black/80 to-transparent flex items-center justify-between">
         <div className="flex items-center gap-1.5 min-w-0">
-          {/* Hand raise */}
-          {hasHandRaised && (
-            <span className="text-sm">✋</span>
-          )}
-          {/* Name */}
+          {hasHandRaised && <span className="text-sm">✋</span>}
           <span className="text-white text-xs font-medium truncate">
             {participant.displayName}
             {participant.isLocal && ' (You)'}
@@ -95,17 +73,12 @@ export function VideoTile({ participant, isPinned, onPin }: Props) {
         </div>
 
         <div className="flex items-center gap-1.5 flex-shrink-0">
-          {/* Network quality */}
           {networkBars(participant.networkQuality)}
-
-          {/* Mic state */}
           {participant.audioEnabled ? (
             <AudioLevelIcon level={participant.audioLevel} />
           ) : (
             <MicOffIcon />
           )}
-
-          {/* Camera off */}
           {!participant.videoEnabled && (
             <span title="Camera off">
               <svg className="w-3.5 h-3.5 text-red-400" viewBox="0 0 24 24" fill="currentColor">
@@ -117,14 +90,12 @@ export function VideoTile({ participant, isPinned, onPin }: Props) {
         </div>
       </div>
 
-      {/* Screen share badge */}
       {participant.isScreenSharing && (
         <div className="absolute top-2 left-2 bg-blue-600 text-white text-xs px-1.5 py-0.5 rounded">
           Sharing
         </div>
       )}
 
-      {/* Pin button on hover */}
       <button
         className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-black/60 text-white p-1 rounded"
         onClick={(e) => { e.stopPropagation(); onPin?.(participant.userId) }}
