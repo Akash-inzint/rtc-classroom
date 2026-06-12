@@ -1,0 +1,23 @@
+version: '3.9'
+
+services:
+  classroom-app:
+    build:
+      context: .
+      args:
+        # These are baked into the frontend bundle at build time
+        VITE_RTC_PROVIDER: ${VITE_RTC_PROVIDER:-agora}
+        VITE_AGORA_APP_ID: ${VITE_AGORA_APP_ID}
+        VITE_AGORA_APP_CERTIFICATE: ${VITE_AGORA_APP_CERTIFICATE}
+        VITE_AGORA_TOKEN: ${VITE_AGORA_TOKEN:-}
+        VITE_TRTC_SDK_APP_ID: ${VITE_TRTC_SDK_APP_ID:-}
+        VITE_TRTC_SECRET_KEY: ${VITE_TRTC_SECRET_KEY:-}
+        VITE_TRTC_USER_SIG: ${VITE_TRTC_USER_SIG:-none}
+    ports:
+      - "8080:8080"
+    environment:
+      # Server reads these at runtime for token generation API
+      VITE_AGORA_APP_ID: ${VITE_AGORA_APP_ID}
+      VITE_AGORA_APP_CERTIFICATE: ${VITE_AGORA_APP_CERTIFICATE}
+      PORT: 8080
+    restart: unless-stopped
