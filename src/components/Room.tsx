@@ -26,44 +26,34 @@ export function Room({ roomId, userId, displayName, enableCamera, enableMic, onL
     participants, layoutMode, isSidebarOpen, sidebarTab,
     setRoom, leaveRoom: clearRoom, addParticipant, removeParticipant,
     updateParticipant, setLocalParticipant, setActiveSpeaker, sendMessage,
+    toggleSidebar,
   } = useRoomStore()
   const {
     setCameraEnabled, setMicEnabled, setScreenSharing,
     setConnectionState, setNetworkQuality,
   } = useMediaStore()
 
-  // Join the room and wire all provider events
   useEffect(() => {
     if (!provider) return
 
     setRoom(roomId, userId, displayName)
     setLocalParticipant({ videoEnabled: enableCamera, audioEnabled: enableMic })
 
-    // Wire events
-    const onUserJoined = (p: any) => {
-      addParticipant({ ...p, displayName: p.displayName || p.userId })
-    }
+    const onUserJoined = (p: any) => addParticipant({ ...p, displayName: p.displayName || p.userId })
     const onUserLeft = (uid: string) => removeParticipant(uid)
     const onAudioState = (uid: string, enabled: boolean) => {
-      if (uid === 'local') {
-        setLocalParticipant({ audioEnabled: enabled })
-      } else {
-        updateParticipant(uid, { audioEnabled: enabled })
-      }
+      if (uid === 'local') setLocalParticipant({ audioEnabled: enabled })
+      else updateParticipant(uid, { audioEnabled: enabled })
     }
     const onVideoState = (uid: string, enabled: boolean) => {
-      if (uid === 'local') {
-        setLocalParticipant({ videoEnabled: enabled })
-      } else {
-        updateParticipant(uid, { videoEnabled: enabled })
-      }
+      if (uid === 'local') setLocalParticipant({ videoEnabled: enabled })
+      else updateParticipant(uid, { videoEnabled: enabled })
     }
     const onScreenShareStart = (uid: string) => updateParticipant(uid, { isScreenSharing: true })
     const onScreenShareStop = (uid: string) => updateParticipant(uid, { isScreenSharing: false })
     const onAudioLevel = (uid: string, level: number) => {
       const targetId = uid === 'local' ? userId : uid
       updateParticipant(targetId, { audioLevel: level })
-      // Active speaker: the participant with level > 20
       if (level > 20) setActiveSpeaker(targetId)
     }
     const onNetworkQuality = (uid: string, uplink: number, downlink: number) => {
@@ -92,21 +82,15 @@ export function Room({ roomId, userId, displayName, enableCamera, enableMic, onL
     provider.on('chatMessage', onChatMessage)
     provider.on('error', onError)
 
-    // Join the room — generate UserSig dynamically for TRTC if SecretKey is set
     async function join() {
       let token: string
       let appId: string | number
 
       if (providerName === 'trtc') {
         appId = env.trtc.sdkAppId
-        if (env.trtc.secretKey) {
-          // Auto-generate UserSig for this userId — no manual token management needed
-          token = await genTRTCUserSig(env.trtc.sdkAppId, env.trtc.secretKey, userId)
-          console.log('[TRTC] Auto-generated UserSig for userId:', userId)
-        } else {
-          // Fall back to static UserSig from .env.local
-          token = env.trtc.userSig
-        }
+        token = env.trtc.secretKey
+          ? await genTRTCUserSig(env.trtc.sdkAppId, env.trtc.secretKey, userId)
+          : env.trtc.userSig
       } else {
         appId = env.agora.appId
         if (env.agora.appCertificate) {
@@ -114,7 +98,6 @@ export function Room({ roomId, userId, displayName, enableCamera, enableMic, onL
           const data = await res.json()
           if (data.error) throw new Error('Token fetch failed: ' + data.error)
           token = data.token
-          console.log('[Agora] Got token for channel:', roomId)
         } else {
           token = env.agora.token || ''
         }
@@ -157,38 +140,56 @@ export function Room({ roomId, userId, displayName, enableCamera, enableMic, onL
   }
 
   return (
-    <div className="flex flex-col h-screen bg-gray-950 overflow-hidden">
+    // 100dvh accounts for mobile browser address bar
+    <div className="flex flex-col bg-gray-950 overflow-hidden" style={{ height: '100dvh' }}>
       {/* Top bar */}
-      <div className="flex items-center justify-between px-4 py-2 bg-gray-900 border-b border-gray-800 flex-shrink-0">
-        <div className="flex items-center gap-2">
-          <span className="text-white text-sm font-medium">Room: {roomId}</span>
-          <span className="text-gray-500 text-xs">· {participants.length} participant{participants.length !== 1 ? 's' : ''}</span>
+      <div className="flex items-center justify-between px-3 py-2 bg-gray-900 border-b border-gray-800 flex-shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-white text-sm font-medium truncate">Room: {roomId}</span>
+          <span className="text-gray-500 text-xs flex-shrink-0">· {participants.length}</span>
         </div>
-        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+        <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 ${
           providerName === 'agora' ? 'bg-blue-700/40 text-blue-300' : 'bg-orange-700/40 text-orange-300'
         }`}>
-          {providerName === 'agora' ? 'Agora RTC' : 'Tencent TRTC'}
+          {providerName === 'agora' ? 'Agora' : 'TRTC'}
         </span>
       </div>
 
       {/* Main content */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden" style={{ minHeight: 0 }}>
         {/* Video area */}
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 overflow-hidden" style={{ minWidth: 0 }}>
           {layoutMode === 'grid'
             ? <GridView participants={participants} />
             : <SpeakerView participants={participants} />
           }
         </div>
 
-        {/* Sidebar */}
+        {/* Sidebar — overlays on mobile, fixed panel on desktop */}
         {isSidebarOpen && (
-          <div className="w-72 bg-gray-900 border-l border-gray-800 flex flex-col flex-shrink-0">
-            {sidebarTab === 'participants'
-              ? <ParticipantPanel />
-              : <ChatPanel />
-            }
-          </div>
+          <>
+            {/* Mobile overlay backdrop */}
+            <div
+              className="fixed inset-0 bg-black/50 z-20 md:hidden"
+              onClick={() => toggleSidebar()}
+            />
+            <div className="
+              fixed inset-y-0 right-0 z-30 w-full max-w-xs
+              md:relative md:inset-auto md:z-auto md:w-72 md:flex-shrink-0
+              bg-gray-900 border-l border-gray-800 flex flex-col
+            ">
+              {/* Mobile close button */}
+              <div className="flex items-center justify-between px-3 py-2 border-b border-gray-700 md:hidden">
+                <span className="text-white text-sm font-medium capitalize">{sidebarTab}</span>
+                <button onClick={() => toggleSidebar()} className="text-gray-400 p-1">
+                  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+                  </svg>
+                </button>
+              </div>
+              {sidebarTab === 'participants' ? <ParticipantPanel /> : <ChatPanel />}
+            </div>
+          </>
         )}
       </div>
 
