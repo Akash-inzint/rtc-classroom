@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import type { RTCParticipant } from '../rtc/IRTCProvider'
 import { VideoPlaceholder } from './VideoPlaceholder'
 import { useRTCContext } from '../rtc/RTCContext'
@@ -11,20 +11,41 @@ interface Props {
 }
 
 export function VideoTile({ participant, isPinned, onPin }: Props) {
-  const videoRef = useRef<HTMLDivElement>(null)
   const { provider } = useRTCContext()
   const { activeSpeakerId, handRaises } = useRoomStore()
+  const providerRef = useRef(provider)
+  const participantRef = useRef(participant)
+  providerRef.current = provider
+  participantRef.current = participant
 
   const isActive = activeSpeakerId === participant.userId
   const hasHandRaised = handRaises.includes(participant.userId)
 
-  useEffect(() => {
-    if (!provider || !videoRef.current) return
+  // Callback ref: fires whenever the element is mounted/unmounted, so video
+  // re-attaches correctly when the tile moves between grid and speaker view.
+  const videoRef = useCallback((el: HTMLDivElement | null) => {
+    if (!el || !providerRef.current) return
+    const p = participantRef.current
+    if (p.isLocal) {
+      providerRef.current.playLocalVideo(el)
+    } else if (p.videoEnabled) {
+      providerRef.current.playRemoteVideo(p.userId, el)
+    }
+  }, []) // stable — provider/participant accessed via refs
 
+  // Re-attach when videoEnabled flips to true (element already mounted)
+  const elRef = useRef<HTMLDivElement | null>(null)
+  const setRef = useCallback((el: HTMLDivElement | null) => {
+    elRef.current = el
+    videoRef(el)
+  }, [videoRef])
+
+  useEffect(() => {
+    if (!provider || !elRef.current || !participant.videoEnabled) return
     if (participant.isLocal) {
-      provider.playLocalVideo(videoRef.current)
-    } else if (participant.videoEnabled) {
-      provider.playRemoteVideo(participant.userId, videoRef.current)
+      provider.playLocalVideo(elRef.current)
+    } else {
+      provider.playRemoteVideo(participant.userId, elRef.current)
     }
   }, [provider, participant.userId, participant.isLocal, participant.videoEnabled])
 
@@ -52,7 +73,7 @@ export function VideoTile({ participant, isPinned, onPin }: Props) {
       onClick={() => onPin?.(participant.userId)}
     >
       {/* Video / Placeholder */}
-      <div ref={videoRef} className={`w-full h-full ${participant.videoEnabled ? '' : 'hidden'}`} />
+      <div ref={setRef} className={`w-full h-full ${participant.videoEnabled ? '' : 'hidden'}`} />
       {!participant.videoEnabled && <VideoPlaceholder displayName={participant.displayName} />}
 
       {/* Bottom overlay */}

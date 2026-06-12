@@ -257,14 +257,7 @@ export class TRTCAdapter implements IRTCProvider {
   }
 
   playRemoteVideo(userId: string, element: HTMLElement): void {
-    // Try main stream first; if this user is screen-sharing, also try 'screen' streamType
-    const p = this.participants.get(userId)
-    const streamType = (p?.isScreenSharing && !p?.videoEnabled) ? 'screen' : 'main'
-    this.client.startRemoteVideo({ userId, streamType, view: element }).catch(() => {
-      // Fallback: try the other stream type
-      const fallback = streamType === 'main' ? 'screen' : 'main'
-      this.client.startRemoteVideo({ userId, streamType: fallback, view: element }).catch(() => {})
-    })
+    this.client.startRemoteVideo({ userId, streamType: 'main', view: element }).catch(() => {})
   }
 
   playLocalVideo(element: HTMLElement): void {
