@@ -27,53 +27,50 @@ export class AgoraAdapter implements IRTCProvider {
   private handlers = new Map<string, Set<Function>>()
   private appId = ''
   private channelName = ''
+  private userId = ''
   private noiseSuppression = true
   private _cameraEnabled = false
   private _micEnabled = false
-  private networkQualityCache = new Map<string, { uplink: number; downlink: number }>()
 
   async initialize(): Promise<void> {
     this.client = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp9' })
-    AgoraRTC.setLogLevel(3) // ERROR only
+    AgoraRTC.setLogLevel(4) // NONE — suppress all SDK logs
     this._bindClientEvents()
   }
 
   async joinRoom(config: JoinConfig): Promise<void> {
     this.appId = config.appId as string
     this.channelName = config.roomId
+    this.userId = config.userId
 
-    console.log('[Agora] joining channel:', config.roomId, 'uid:', config.userId, 'token:', config.token ? config.token.slice(0,20)+'...' : 'null')
-    await this.client.join(
-      this.appId,
-      this.channelName,
-      config.token || null,
-      config.userId
-    )
-    console.log('[Agora] joined. remoteUsers already in channel:', this.client.remoteUsers.map(u => u.uid))
+    // Join + create tracks in parallel for faster join
+    const [micTrack, camTrack] = await Promise.all([
+      this.client.join(this.appId, this.channelName, config.token || null, config.userId).then(() => null),
+      config.enableMic ? AgoraRTC.createMicrophoneAudioTrack({ AEC: true, ANS: this.noiseSuppression, AGC: true }) : Promise.resolve(null),
+      config.enableCamera ? AgoraRTC.createCameraVideoTrack({ encoderConfig: '720p_2' }) : Promise.resolve(null),
+    ]).then(([, mic, cam]) => [mic, cam] as [IMicrophoneAudioTrack | null, ICameraVideoTrack | null])
 
-    const tracksToPublish: (IMicrophoneAudioTrack | ICameraVideoTrack)[] = []
+    if (micTrack) { this.localAudioTrack = micTrack; this._micEnabled = true }
+    if (camTrack) { this.localVideoTrack = camTrack; this._cameraEnabled = true }
 
-    if (config.enableMic) {
-      this.localAudioTrack = await AgoraRTC.createMicrophoneAudioTrack({
-        AEC: true,
-        ANS: this.noiseSuppression,
-        AGC: true,
-      })
-      tracksToPublish.push(this.localAudioTrack)
-      this._micEnabled = true
-    }
-
-    if (config.enableCamera) {
-      this.localVideoTrack = await AgoraRTC.createCameraVideoTrack({
-        encoderConfig: '720p_2',
-      })
-      tracksToPublish.push(this.localVideoTrack)
-      this._cameraEnabled = true
-    }
-
+    const tracksToPublish = [micTrack, camTrack].filter(Boolean) as (IMicrophoneAudioTrack | ICameraVideoTrack)[]
     if (tracksToPublish.length > 0) {
       await this.client.publish(tracksToPublish)
     }
+
+    // Stream channel for chat messages
+    try {
+      await (this.client as any).enableStreamMessage()
+    } catch { /* ignore if not supported */ }
+
+    ;(this.client as any).on?.('stream-message', (_uid: any, payload: Uint8Array) => {
+      try {
+        const data = JSON.parse(new TextDecoder().decode(payload))
+        if (data.type === 'chat') {
+          this.emit('chatMessage', data.userId, data.displayName, data.text)
+        }
+      } catch { /* ignore */ }
+    })
 
     // Pick up anyone already in the channel before we joined
     for (const user of this.client.remoteUsers) {
@@ -81,18 +78,17 @@ export class AgoraAdapter implements IRTCProvider {
       const p = this._buildParticipant(userId)
 
       if (user.hasAudio) {
-        await this.client.subscribe(user, 'audio')
+        await this.client.subscribe(user, 'audio').catch(() => {})
         user.audioTrack?.play()
         p.audioEnabled = true
       }
       if (user.hasVideo) {
-        await this.client.subscribe(user, 'video')
+        await this.client.subscribe(user, 'video').catch(() => {})
         p.videoEnabled = true
       }
 
       this.participants.set(userId, p)
       this.emit('userJoined', p)
-
       if (p.audioEnabled) this.emit('audioStateChanged', userId, true)
       if (p.videoEnabled) this.emit('videoStateChanged', userId, true)
     }
@@ -132,14 +128,12 @@ export class AgoraAdapter implements IRTCProvider {
 
   private _bindClientEvents(): void {
     this.client.on('user-joined', (user) => {
-      console.log('[Agora] user-joined:', user.uid)
       const p = this._buildParticipant(String(user.uid))
       this.participants.set(p.userId, p)
       this.emit('userJoined', p)
     })
 
     this.client.on('user-left', (user) => {
-      console.log('[Agora] user-left:', user.uid)
       const userId = String(user.uid)
       this.participants.delete(userId)
       this.emit('userLeft', userId)
@@ -160,9 +154,13 @@ export class AgoraAdapter implements IRTCProvider {
         p.videoEnabled = true
         this.participants.set(userId, p)
         this.emit('videoStateChanged', userId, true)
-        if (isScreenShare) {
-          this.emit('screenShareStarted', userId)
-        }
+        if (isScreenShare) this.emit('screenShareStarted', userId)
+      }
+
+      // Ensure participant is in the list
+      if (!this.participants.has(userId)) {
+        this.participants.set(userId, p)
+        this.emit('userJoined', p)
       }
     })
 
@@ -191,10 +189,6 @@ export class AgoraAdapter implements IRTCProvider {
     })
 
     this.client.on('network-quality', (stats) => {
-      this.networkQualityCache.set('local', {
-        uplink: stats.uplinkNetworkQuality,
-        downlink: stats.downlinkNetworkQuality,
-      })
       this.emit('networkQualityChanged', 'local', stats.uplinkNetworkQuality, stats.downlinkNetworkQuality)
     })
 
@@ -209,42 +203,44 @@ export class AgoraAdapter implements IRTCProvider {
     })
   }
 
-  async enableCamera(deviceId?: string): Promise<void> {
-    if (this.localVideoTrack) {
-      await this.localVideoTrack.setEnabled(true)
-    } else {
-      this.localVideoTrack = await AgoraRTC.createCameraVideoTrack(
-        deviceId ? { cameraId: deviceId } : { encoderConfig: '720p_2' }
-      )
-      await this.client.publish([this.localVideoTrack])
-    }
-    this._cameraEnabled = true
-    this.emit('videoStateChanged', 'local', true)
-  }
-
-  async disableCamera(): Promise<void> {
-    await this.localVideoTrack?.setEnabled(false)
-    this._cameraEnabled = false
-    this.emit('videoStateChanged', 'local', false)
-  }
-
+  // Mic toggle — unpublish/republish so remote users see the state change
   async enableMicrophone(deviceId?: string): Promise<void> {
-    if (this.localAudioTrack) {
-      await this.localAudioTrack.setEnabled(true)
-    } else {
+    if (!this.localAudioTrack) {
       this.localAudioTrack = await AgoraRTC.createMicrophoneAudioTrack(
         deviceId ? { microphoneId: deviceId } : { AEC: true, ANS: this.noiseSuppression, AGC: true }
       )
-      await this.client.publish([this.localAudioTrack])
     }
+    await this.client.publish([this.localAudioTrack])
     this._micEnabled = true
     this.emit('audioStateChanged', 'local', true)
   }
 
   async disableMicrophone(): Promise<void> {
-    await this.localAudioTrack?.setEnabled(false)
+    if (this.localAudioTrack) {
+      await this.client.unpublish([this.localAudioTrack])
+    }
     this._micEnabled = false
     this.emit('audioStateChanged', 'local', false)
+  }
+
+  // Camera toggle — unpublish/republish so remote users see the state change
+  async enableCamera(deviceId?: string): Promise<void> {
+    if (!this.localVideoTrack) {
+      this.localVideoTrack = await AgoraRTC.createCameraVideoTrack(
+        deviceId ? { cameraId: deviceId } : { encoderConfig: '720p_2' }
+      )
+    }
+    await this.client.publish([this.localVideoTrack])
+    this._cameraEnabled = true
+    this.emit('videoStateChanged', 'local', true)
+  }
+
+  async disableCamera(): Promise<void> {
+    if (this.localVideoTrack) {
+      await this.client.unpublish([this.localVideoTrack])
+    }
+    this._cameraEnabled = false
+    this.emit('videoStateChanged', 'local', false)
   }
 
   async switchCamera(deviceId: string): Promise<void> {
@@ -256,7 +252,6 @@ export class AgoraAdapter implements IRTCProvider {
   }
 
   async setSpeaker(deviceId: string): Promise<void> {
-    // Agora Web 4.x: set sink on all audio elements
     document.querySelectorAll('audio').forEach((el: HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }) => {
       el.setSinkId?.(deviceId)
     })
@@ -265,11 +260,7 @@ export class AgoraAdapter implements IRTCProvider {
   async enableNoiseSuppression(enabled: boolean): Promise<void> {
     this.noiseSuppression = enabled
     if (this.localAudioTrack) {
-      try {
-        await (this.localAudioTrack as any).setAINSMode(enabled ? 'STATIONARY' : 'NONE')
-      } catch {
-        // AINSMode not supported in all browser versions
-      }
+      try { await (this.localAudioTrack as any).setAINSMode(enabled ? 'STATIONARY' : 'NONE') } catch { /* ignore */ }
     }
   }
 
@@ -280,13 +271,12 @@ export class AgoraAdapter implements IRTCProvider {
 
   async startScreenShare(): Promise<void> {
     this.screenClient = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp9' })
-    await this.screenClient.join(this.appId, this.channelName, null, `${this.client.uid}-screen`)
+    const screenToken = await this._fetchToken(`${this.userId}-screen`)
+    await this.screenClient.join(this.appId, this.channelName, screenToken, `${this.userId}-screen`)
 
     const result = await AgoraRTC.createScreenVideoTrack({ optimizationMode: 'detail' }, 'disable')
     this.localScreenTrack = Array.isArray(result) ? result[0] : result as ILocalVideoTrack
     await this.screenClient.publish([this.localScreenTrack!])
-
-    // When user stops via browser's stop-sharing button
     this.localScreenTrack!.on('track-ended', () => { this.stopScreenShare() })
     this.emit('screenShareStarted', 'local')
   }
@@ -306,6 +296,13 @@ export class AgoraAdapter implements IRTCProvider {
     this.emit('screenShareStopped', 'local')
   }
 
+  async sendChatMessage(userId: string, displayName: string, text: string): Promise<void> {
+    try {
+      const payload = new TextEncoder().encode(JSON.stringify({ type: 'chat', userId, displayName, text }))
+      await (this.client as any).sendStreamMessage(payload)
+    } catch { /* ignore */ }
+  }
+
   async getCameras(): Promise<DeviceInfo[]> {
     const list = await AgoraRTC.getCameras()
     return list.map(d => ({ deviceId: d.deviceId, label: d.label, kind: 'videoinput' as const }))
@@ -320,13 +317,10 @@ export class AgoraAdapter implements IRTCProvider {
     try {
       const list = await AgoraRTC.getPlaybackDevices()
       return list.map(d => ({ deviceId: d.deviceId, label: d.label, kind: 'audiooutput' as const }))
-    } catch {
-      return []
-    }
+    } catch { return [] }
   }
 
   playRemoteVideo(userId: string, element: HTMLElement): void {
-    // Find the remote user and play their video track into the element
     const remoteUsers = this.client.remoteUsers
     const user = remoteUsers.find(u => String(u.uid) === userId)
     if (user?.videoTrack) {
@@ -342,16 +336,16 @@ export class AgoraAdapter implements IRTCProvider {
     return Array.from(this.participants.values())
   }
 
-  isCameraEnabled(): boolean {
-    return this._cameraEnabled && (this.localVideoTrack?.enabled ?? false)
-  }
+  isCameraEnabled(): boolean { return this._cameraEnabled }
+  isMicrophoneEnabled(): boolean { return this._micEnabled }
+  isScreenSharing(): boolean { return this.screenClient !== null }
 
-  isMicrophoneEnabled(): boolean {
-    return this._micEnabled && (this.localAudioTrack?.enabled ?? false)
-  }
-
-  isScreenSharing(): boolean {
-    return this.screenClient !== null
+  private async _fetchToken(uid: string): Promise<string | null> {
+    try {
+      const res = await fetch(`/api/agora-token?channel=${encodeURIComponent(this.channelName)}&uid=${encodeURIComponent(uid)}`)
+      const data = await res.json()
+      return data.token || null
+    } catch { return null }
   }
 
   private _buildParticipant(userId: string): RTCParticipant {

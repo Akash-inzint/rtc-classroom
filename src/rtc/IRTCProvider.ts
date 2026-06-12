@@ -42,6 +42,7 @@ export type RTCEvent =
   | 'audioLevelChanged'
   | 'networkQualityChanged'
   | 'connectionStateChanged'
+  | 'chatMessage'
   | 'error'
 
 export type RTCEventHandlers = {
@@ -54,6 +55,7 @@ export type RTCEventHandlers = {
   audioLevelChanged: (userId: string, level: number) => void
   networkQualityChanged: (userId: string, uplink: number, downlink: number) => void
   connectionStateChanged: (state: RTCConnectionState) => void
+  chatMessage: (userId: string, displayName: string, text: string) => void
   error: (message: string, code?: string | number) => void
 }
 
@@ -84,6 +86,9 @@ export interface IRTCProvider {
   // Screen sharing
   startScreenShare(): Promise<void>
   stopScreenShare(): Promise<void>
+
+  // Chat
+  sendChatMessage(userId: string, displayName: string, text: string): Promise<void>
 
   // Device enumeration
   getCameras(): Promise<DeviceInfo[]>

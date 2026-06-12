@@ -25,7 +25,7 @@ export function Room({ roomId, userId, displayName, enableCamera, enableMic, onL
   const {
     participants, layoutMode, isSidebarOpen, sidebarTab,
     setRoom, leaveRoom: clearRoom, addParticipant, removeParticipant,
-    updateParticipant, setLocalParticipant, setActiveSpeaker,
+    updateParticipant, setLocalParticipant, setActiveSpeaker, sendMessage,
   } = useRoomStore()
   const {
     setCameraEnabled, setMicEnabled, setScreenSharing,
@@ -76,6 +76,9 @@ export function Room({ roomId, userId, displayName, enableCamera, enableMic, onL
     }
     const onConnectionState = (state: any) => setConnectionState(state)
     const onError = (msg: string) => console.error('[RTC]', msg)
+    const onChatMessage = (fromUserId: string, fromDisplayName: string, text: string) => {
+      sendMessage(fromUserId, fromDisplayName, text)
+    }
 
     provider.on('userJoined', onUserJoined)
     provider.on('userLeft', onUserLeft)
@@ -86,6 +89,7 @@ export function Room({ roomId, userId, displayName, enableCamera, enableMic, onL
     provider.on('audioLevelChanged', onAudioLevel)
     provider.on('networkQualityChanged', onNetworkQuality)
     provider.on('connectionStateChanged', onConnectionState)
+    provider.on('chatMessage', onChatMessage)
     provider.on('error', onError)
 
     // Join the room — generate UserSig dynamically for TRTC if SecretKey is set
@@ -137,6 +141,7 @@ export function Room({ roomId, userId, displayName, enableCamera, enableMic, onL
       provider.off('audioLevelChanged', onAudioLevel)
       provider.off('networkQualityChanged', onNetworkQuality)
       provider.off('connectionStateChanged', onConnectionState)
+      provider.off('chatMessage', onChatMessage)
       provider.off('error', onError)
     }
   }, [provider])

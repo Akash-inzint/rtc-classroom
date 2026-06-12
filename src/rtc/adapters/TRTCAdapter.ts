@@ -148,6 +148,16 @@ export class TRTCAdapter implements IRTCProvider {
     this.client.on(TRTC.EVENT.ERROR, ({ code, message }: any) => {
       this.emit('error', message || 'TRTC error', code)
     })
+
+    // Custom messages for chat
+    this.client.on(TRTC.EVENT.CUSTOM_MESSAGE, ({ userId, message }: any) => {
+      try {
+        const data = JSON.parse(message)
+        if (data.type === 'chat') {
+          this.emit('chatMessage', userId, data.displayName, data.text)
+        }
+      } catch { /* ignore */ }
+    })
   }
 
   async enableCamera(deviceId?: string): Promise<void> {
@@ -213,6 +223,15 @@ export class TRTCAdapter implements IRTCProvider {
     await this.client.stopScreenShare()
     this._screenSharing = false
     this.emit('screenShareStopped', 'local')
+  }
+
+  async sendChatMessage(userId: string, displayName: string, text: string): Promise<void> {
+    try {
+      await this.client.sendCustomMessage({
+        cmdId: 1,
+        data: JSON.stringify({ type: 'chat', displayName, text }),
+      })
+    } catch { /* ignore */ }
   }
 
   async getCameras(): Promise<DeviceInfo[]> {

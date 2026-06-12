@@ -1,24 +1,27 @@
 import { useEffect, useRef, useState } from 'react'
 import { useRoomStore } from '../store/roomStore'
+import { useRTCContext } from '../rtc/RTCContext'
 
 export function ChatPanel() {
   const { messages, localUserId, localDisplayName, sendMessage, markChatRead } = useRoomStore()
+  const { provider } = useRTCContext()
   const [text, setText] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    markChatRead()
-  }, [])
+  useEffect(() => { markChatRead() }, [])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages.length])
 
-  const handleSend = () => {
+  const handleSend = async () => {
     const trimmed = text.trim()
     if (!trimmed) return
-    sendMessage(localUserId, localDisplayName, trimmed)
     setText('')
+    // Add to local store immediately so sender sees it
+    sendMessage(localUserId, localDisplayName, trimmed)
+    // Broadcast to all other participants via RTC data channel
+    await provider?.sendChatMessage(localUserId, localDisplayName, trimmed)
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -28,19 +31,16 @@ export function ChatPanel() {
     }
   }
 
-  const formatTime = (ts: number) => {
-    const d = new Date(ts)
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  }
+  const formatTime = (ts: number) =>
+    new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 
   return (
     <div className="flex flex-col h-full">
       <div className="px-3 py-2 border-b border-gray-700">
         <span className="text-white text-sm font-medium">Chat</span>
-        <p className="text-gray-500 text-xs">Messages are only visible during this call</p>
+        <p className="text-gray-500 text-xs">Messages visible during this call only</p>
       </div>
 
-      {/* Messages */}
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
         {messages.length === 0 && (
           <p className="text-gray-600 text-xs text-center mt-8">No messages yet</p>
@@ -64,7 +64,6 @@ export function ChatPanel() {
         <div ref={bottomRef} />
       </div>
 
-      {/* Input */}
       <div className="p-3 border-t border-gray-700">
         <div className="flex gap-2">
           <textarea
