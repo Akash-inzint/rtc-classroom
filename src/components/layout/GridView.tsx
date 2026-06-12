@@ -19,15 +19,24 @@ export function GridView({ participants }: Props) {
   }
 
   const cols =
-    participants.length <= 1 ? 'grid-cols-1' :
-    participants.length <= 4 ? 'grid-cols-2' :
-    participants.length <= 9 ? 'grid-cols-3' :
-    'grid-cols-4'
+    participants.length <= 1 ? 1 :
+    participants.length <= 4 ? 2 :
+    participants.length <= 9 ? 3 : 4
+
+  const rows = Math.ceil(participants.length / cols)
 
   return (
-    <div className={`grid ${cols} gap-2 w-full h-full p-2`} style={{ gridAutoRows: '1fr' }}>
+    <div
+      className="w-full h-full p-2"
+      style={{
+        display: 'grid',
+        gridTemplateColumns: `repeat(${cols}, 1fr)`,
+        gridTemplateRows: `repeat(${rows}, 1fr)`,
+        gap: '8px',
+      }}
+    >
       {participants.map(p => (
-        <div key={p.userId} className="relative min-h-0 h-full">
+        <div key={p.userId} style={{ position: 'relative', minHeight: 0, minWidth: 0 }}>
           <VideoTile
             participant={p}
             isPinned={pinnedUserId === p.userId}

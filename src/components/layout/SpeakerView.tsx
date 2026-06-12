@@ -6,6 +6,8 @@ interface Props {
   participants: RTCParticipant[]
 }
 
+const STRIP_HEIGHT = 112 // px — thumbnail strip height
+
 export function SpeakerView({ participants }: Props) {
   const { pinnedUserId, activeSpeakerId, setPinnedUser, setLayoutMode } = useRoomStore()
 
@@ -13,23 +15,19 @@ export function SpeakerView({ participants }: Props) {
   const primary = participants.find(p => p.userId === primaryId) || participants[0]
   const strip = participants.filter(p => p.userId !== primary?.userId)
 
-  const handlePin = (userId: string) => {
-    if (pinnedUserId === userId) {
-      setPinnedUser(null)
-    } else {
-      setPinnedUser(userId)
-    }
-  }
-
   const handleUnpin = () => {
     setPinnedUser(null)
     if (participants.length === 1) setLayoutMode('grid')
   }
 
+  const handlePin = (userId: string) => {
+    setPinnedUser(pinnedUserId === userId ? null : userId)
+  }
+
   return (
-    <div className="flex flex-col h-full gap-2 p-2">
-      {/* Primary large tile */}
-      <div className="flex-1 min-h-0 w-full relative">
+    <div className="w-full h-full flex flex-col overflow-hidden p-2 gap-2">
+      {/* Primary tile — takes all remaining height */}
+      <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
         {primary && (
           <VideoTile
             participant={primary}
@@ -39,11 +37,18 @@ export function SpeakerView({ participants }: Props) {
         )}
       </div>
 
-      {/* Strip of thumbnails */}
+      {/* Thumbnail strip — fixed height, scrollable */}
       {strip.length > 0 && (
-        <div className="flex gap-2 overflow-x-auto flex-shrink-0" style={{ height: '7rem' }}>
+        <div
+          className="flex gap-2 overflow-x-auto flex-shrink-0"
+          style={{ height: STRIP_HEIGHT }}
+        >
           {strip.map(p => (
-            <div key={p.userId} className="h-full aspect-video flex-shrink-0 relative">
+            <div
+              key={p.userId}
+              className="flex-shrink-0 relative"
+              style={{ height: STRIP_HEIGHT, aspectRatio: '16/9' }}
+            >
               <VideoTile
                 participant={p}
                 isPinned={pinnedUserId === p.userId}
